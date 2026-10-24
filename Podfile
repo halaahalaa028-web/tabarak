@@ -2,12 +2,10 @@
 platform :ios, '15.0'
 
 target 'تبارك فارما' do
-  # Comment the next line if you don't want to use dynamic frameworks
-  use_frameworks!
-
-  # Add the pod for Firebase Cloud Messaging
+  # Use CocoaPods' default static-library integration.
+  # Avoid use_frameworks! because the Arabic target name creates an invalid
+  # aggregate framework linker flag (Pods____________) during the iOS archive.
   pod 'Firebase/Messaging'
-
 end
 
 post_install do |installer|

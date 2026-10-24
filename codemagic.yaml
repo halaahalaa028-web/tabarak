@@ -33,55 +33,53 @@ workflows:
           test -f Podfile.lock
           test -d Pods
 
-          echo "========== REMOVE BROKEN COCOAPODS AGGREGATE LINK FLAG =========="
+          echo "========== PATCH ONLY INVALID COCOAPODS LINKER FLAGS =========="
           python3 <<'PY'
           from pathlib import Path
+          import re
 
-          root = Path("Pods/Target Support Files")
-          bad_flags = (
-              '-framework Pods____________',
-              '-framework "Pods____________"',
-              "-framework 'Pods____________'",
-          )
+          # Only remove the invalid linker option. Do not treat generated module
+          # names (umbrella.h, dummy.m, modulemap) as linker flags.
+          pattern = re.compile(r'(?<!\\S)-framework\\s+["\\']?Pods_{4,}["\\']?')
+          roots = [Path(".")]
           changed = []
-          for path in root.rglob("*.xcconfig"):
-              text = path.read_text(encoding="utf-8")
-              updated = text
-              for flag in bad_flags:
-                  updated = updated.replace(flag, "")
-              if updated != text:
-                  path.write_text(updated, encoding="utf-8")
-                  changed.append(str(path))
+          for base in roots:
+              for path in base.rglob("*"):
+                  if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
+                      continue
+                  if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
+                      continue
+                  try:
+                      original = path.read_text(encoding="utf-8")
+                  except (OSError, UnicodeDecodeError):
+                      continue
+                  updated, count = pattern.subn("", original)
+                  if count:
+                      path.write_text(updated, encoding="utf-8")
+                      changed.append(f"{path} (removed {count})")
 
-          print("Patched xcconfig files:", changed if changed else "none")
-          if not changed:
-              print("Checking generated CocoaPods files for the invalid flag...")
-              matches = []
-              for path in root.rglob("*"):
-                  if path.is_file():
-                      try:
-                          if "Pods____________" in path.read_text(encoding="utf-8", errors="ignore"):
-                              matches.append(str(path))
-                      except OSError:
-                          pass
-              print("Remaining matches:", matches)
+          print("Files patched:", changed if changed else "none")
+          remaining = []
+          for base in roots:
+              for path in base.rglob("*"):
+                  if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
+                      continue
+                  if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
+                      continue
+                  try:
+                      content = path.read_text(encoding="utf-8")
+                  except (OSError, UnicodeDecodeError):
+                      continue
+                  if pattern.search(content):
+                      remaining.append(str(path))
+          print("Remaining invalid linker flags:", remaining)
+          if remaining:
+              raise SystemExit("ERROR: Invalid aggregate CocoaPods linker flag remains.")
           PY
 
-          echo "========== VERIFY INVALID FLAG REMOVED =========="
-          if grep -R -n -- "Pods____________" "Pods/Target Support Files"; then
-            echo "ERROR: Invalid Pods framework reference remains."
-            exit 1
-          else
-            echo "Invalid Pods framework reference removed."
-          fi
-
-          echo "========== SEARCH INVALID FRAMEWORK REFERENCES =========="
-          grep -R -n --exclude-dir=.git --exclude-dir=build \
-            "Pods____________" . || true
-
-          echo "========== GENERATED COCOAPODS FILES =========="
-          find "Pods/Target Support Files" -maxdepth 2 \
-            \( -name "*.xcconfig" -o -name "*.framework" \) -print
+          echo "========== COCOAPODS GENERATED FILES =========="
+          find "Pods/Target Support Files" -maxdepth 2 \\
+            \\( -name "*.xcconfig" -o -name "*.framework" \\) -print
 
       - name: Set up code signing
         script: |

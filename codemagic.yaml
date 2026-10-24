@@ -35,6 +35,8 @@ workflows:
 
           if [ -z "$WORKSPACE" ]; then
             echo "ERROR: Xcode workspace not found."
+            echo "Available workspaces:"
+            find . -name "*.xcworkspace" -print
             exit 1
           fi
 
@@ -54,7 +56,7 @@ workflows:
           ')
 
           if [ -z "$SCHEME" ]; then
-            echo "ERROR: Scheme not found."
+            echo "ERROR: Xcode scheme not found."
             exit 1
           fi
 
@@ -107,52 +109,95 @@ workflows:
             -archivePath "$PWD/build/TabarakPharma.xcarchive" \
             archive
 
-      - name: Verify archive application
+      - name: Diagnose archive contents
         script: |
           set -e
+
+          echo "========== CURRENT DIRECTORY =========="
+          pwd
+
+          echo "========== ARCHIVE PATHS =========="
+          find "$PWD/build" -maxdepth 6 -name "*.xcarchive" -print || true
 
           ARCHIVE="$PWD/build/TabarakPharma.xcarchive"
 
           if [ ! -d "$ARCHIVE" ]; then
-            echo "ERROR: Archive not found."
+            echo "ERROR: Expected archive not found."
+            echo "Searching the repository for archives..."
+            find "$PWD" -maxdepth 8 -name "*.xcarchive" -print || true
             exit 1
           fi
 
-          echo "========== ARCHIVED APPLICATIONS =========="
-          find "$ARCHIVE/Products/Applications" -maxdepth 2 -name "*.app" -print
+          echo "========== ARCHIVE CONTENTS =========="
+          find "$ARCHIVE" -maxdepth 5 -print | head -200
 
-          APP=$(find "$ARCHIVE/Products/Applications" -maxdepth 1 -name "*.app" -print -quit)
+          echo "========== APPLICATION BUNDLES =========="
+          find "$ARCHIVE" -name "*.app" -print
+
+          echo "========== ARCHIVE INFO =========="
+          if [ -f "$ARCHIVE/Info.plist" ]; then
+            plutil -p "$ARCHIVE/Info.plist"
+          else
+            echo "Archive Info.plist not found."
+          fi
+
+          echo "========== VERIFY APP BUNDLE ID =========="
+          APP=""
+
+          while IFS= read -r CANDIDATE; do
+            if [ -f "$CANDIDATE/Info.plist" ]; then
+              BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$CANDIDATE/Info.plist" 2>/dev/null || true)
+
+              echo "Found app: $CANDIDATE"
+              echo "Bundle ID: $BUNDLE_ID"
+
+              if [ "$BUNDLE_ID" = "com.tabarakpharma" ]; then
+                APP="$CANDIDATE"
+                break
+              fi
+            fi
+          done < <(find "$ARCHIVE" -name "*.app" -type d -print)
 
           if [ -z "$APP" ]; then
-            echo "ERROR: No application found inside archive."
+            echo "ERROR: App bundle com.tabarakpharma was not found in archive."
             exit 1
           fi
 
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
-
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
-
-          if [ "$BUNDLE_ID" != "com.tabarakpharma" ]; then
-            echo "ERROR: Expected com.tabarakpharma but found $BUNDLE_ID"
-            exit 1
-          fi
-
-          echo "Archive bundle ID verified: $BUNDLE_ID"
+          echo "Verified app bundle: $APP"
+          echo "$APP" > /tmp/tabarak_app_path.txt
 
       - name: Export signed IPA
         script: |
           set -e
 
-          mkdir -p "$PWD/build/ios/ipa"
+          ARCHIVE="$PWD/build/TabarakPharma.xcarchive"
+          EXPORT_DIR="$PWD/build/ios/ipa"
+
+          mkdir -p "$EXPORT_DIR"
+
+          echo "========== XCODE VERSION =========="
+          xcodebuild -version
+
+          echo "========== EXPORT OPTIONS =========="
+          plutil -p "$PWD/exportOptions.plist"
 
           xcodebuild \
             -exportArchive \
-            -archivePath "$PWD/build/TabarakPharma.xcarchive" \
-            -exportPath "$PWD/build/ios/ipa" \
+            -archivePath "$ARCHIVE" \
+            -exportPath "$EXPORT_DIR" \
             -exportOptionsPlist "$PWD/exportOptions.plist"
 
           echo "========== GENERATED IPA FILES =========="
-          find "$PWD/build/ios/ipa" -maxdepth 1 -name "*.ipa" -print
+          find "$EXPORT_DIR" -maxdepth 1 -name "*.ipa" -print
+
+          IPA=$(find "$EXPORT_DIR" -maxdepth 1 -name "*.ipa" -print -quit)
+
+          if [ -z "$IPA" ]; then
+            echo "ERROR: IPA file was not generated."
+            exit 1
+          fi
+
+          echo "SUCCESS: IPA generated at $IPA"
 
     artifacts:
       - build/ios/ipa/*.ipa

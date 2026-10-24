@@ -19,31 +19,97 @@ workflows:
     scripts:
       - name: Install CocoaPods dependencies
         script: |
+          set -e
           pod install
 
       - name: Set up code signing
         script: |
+          set -e
           xcode-project use-profiles
 
-      - name: Build signed IPA
+      - name: Find workspace and scheme
         script: |
+          set -e
+
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" -print -quit)
 
           if [ -z "$WORKSPACE" ]; then
-            echo "Error: Xcode workspace not found"
+            echo "ERROR: Xcode workspace not found."
             exit 1
           fi
 
-          SCHEME=$(xcodebuild -list -workspace "$WORKSPACE" 2>/dev/null | awk '/Schemes:/{getline; sub(/^[[:space:]]+/, ""); print; exit}')
+          xcodebuild -list -workspace "$WORKSPACE"
+
+          SCHEME=$(xcodebuild -list -workspace "$WORKSPACE" 2>/dev/null | awk '
+            /Schemes:/ { found=1; next }
+            found && NF {
+              sub(/^[[:space:]]+/, "")
+              print
+              exit
+            }
+          ')
 
           if [ -z "$SCHEME" ]; then
-            echo "Error: Xcode scheme not found"
+            echo "ERROR: Xcode scheme not found."
             exit 1
           fi
 
-          xcode-project build-ipa \
-            --workspace "$WORKSPACE" \
-            --scheme "$SCHEME"
+          echo "Workspace: $WORKSPACE"
+          echo "Scheme: $SCHEME"
+
+          echo "$WORKSPACE" > /tmp/tabarak_workspace.txt
+          echo "$SCHEME" > /tmp/tabarak_scheme.txt
+
+      - name: Create export options
+        script: |
+          set -e
+
+          cat > "$PWD/exportOptions.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store-connect</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>teamID</key>
+              <string>26P3HVTQKC</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.tabarakpharma</key>
+                  <string>Tabarak Pharma App Store</string>
+              </dict>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Archive iOS app
+        script: |
+          set -e
+
+          WORKSPACE=$(cat /tmp/tabarak_workspace.txt)
+          SCHEME=$(cat /tmp/tabarak_scheme.txt)
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -archivePath "$PWD/build/TabarakPharma.xcarchive" \
+            archive
+
+      - name: Export signed IPA
+        script: |
+          set -e
+
+          mkdir -p "$PWD/build/ios/ipa"
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$PWD/build/TabarakPharma.xcarchive" \
+            -exportPath "$PWD/build/ios/ipa" \
+            -exportOptionsPlist "$PWD/exportOptions.plist"
 
     artifacts:
       - build/ios/ipa/*.ipa

@@ -1,4 +1,3 @@
-```yaml
 workflows:
   tabarak-ios:
     name: Tabarak Pharma iOS
@@ -156,4 +155,56 @@ workflows:
             exit 1
           fi
 
-          echo "Application
+          echo "Application archive verified successfully."
+
+      - name: Create export options
+        script: |
+          set -e
+
+          cat > "$PWD/exportOptions.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store-connect</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>teamID</key>
+              <string>26P3HVTQKC</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.tabarakpharma</key>
+                  <string>Tabarak Pharma App Store 2</string>
+              </dict>
+          </dict>
+          </plist>
+          PLIST
+
+          plutil -lint "$PWD/exportOptions.plist"
+
+      - name: Export signed IPA
+        script: |
+          set -e
+
+          mkdir -p "$PWD/build/ios/ipa"
+
+          xcodebuild \
+            -exportArchive \
+            -archivePath "$PWD/build/TabarakPharma.xcarchive" \
+            -exportPath "$PWD/build/ios/ipa" \
+            -exportOptionsPlist "$PWD/exportOptions.plist"
+
+          IPA=$(find "$PWD/build/ios/ipa" -maxdepth 1 -name "*.ipa" -print -quit)
+
+          if [ -z "$IPA" ]; then
+            echo "ERROR: IPA file was not generated."
+            exit 1
+          fi
+
+          echo "SUCCESS: $IPA"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+

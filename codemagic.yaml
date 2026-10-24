@@ -128,7 +128,7 @@ workflows:
               <key>provisioningProfiles</key>
               <dict>
                   <key>com.tabarakpharma</key>
-                  <string>Tabarak Pharma App Store</string>
+                  <string>Tabarak Pharma App Store 2</string>
               </dict>
           </dict>
           </plist>

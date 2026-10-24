@@ -5,27 +5,46 @@ workflows:
     max_build_duration: 120
     instance_type: mac_mini_m2
 
+    integrations:
+      app_store_connect: Banuvra-iOS-Package
+
     environment:
       xcode: latest
       cocoapods: default
+
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.tabarakpharma
 
     scripts:
       - name: Install CocoaPods dependencies
         script: |
           pod install
 
-      - name: Build iOS simulator app
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles
+
+      - name: Build signed IPA
         script: |
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" -print -quit)
+
+          if [ -z "$WORKSPACE" ]; then
+            echo "Error: Xcode workspace not found"
+            exit 1
+          fi
+
           SCHEME=$(xcodebuild -list -workspace "$WORKSPACE" 2>/dev/null | awk '/Schemes:/{getline; sub(/^[[:space:]]+/, ""); print; exit}')
-          xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
-            -sdk iphonesimulator \
-            -configuration Debug \
-            -derivedDataPath build \
-            build
+
+          if [ -z "$SCHEME" ]; then
+            echo "Error: Xcode scheme not found"
+            exit 1
+          fi
+
+          xcode-project build-ipa \
+            --workspace "$WORKSPACE" \
+            --scheme "$SCHEME"
 
     artifacts:
-      - build/Build/Products/Debug-iphonesimulator/*.app
+      - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log

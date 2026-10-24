@@ -31,6 +31,12 @@ workflows:
         script: |
           set -e
 
+          echo "========== XCODE VERSION =========="
+          xcodebuild -version
+
+          echo "========== EXPORT OPTIONS HELP =========="
+          xcodebuild -help 2>&1 | grep -A 3 -B 2 "exportOptionsPlist" || true
+
           WORKSPACE=$(find . -maxdepth 1 -name "*.xcworkspace" -print -quit)
 
           if [ -z "$WORKSPACE" ]; then
@@ -70,7 +76,7 @@ workflows:
           <plist version="1.0">
           <dict>
               <key>method</key>
-              <string>app-store-connect</string>
+              <string>app-store</string>
               <key>signingStyle</key>
               <string>manual</string>
               <key>teamID</key>
@@ -83,6 +89,8 @@ workflows:
           </dict>
           </plist>
           PLIST
+
+          plutil -lint "$PWD/exportOptions.plist"
 
       - name: Archive iOS app
         script: |
@@ -110,6 +118,9 @@ workflows:
             -archivePath "$PWD/build/TabarakPharma.xcarchive" \
             -exportPath "$PWD/build/ios/ipa" \
             -exportOptionsPlist "$PWD/exportOptions.plist"
+
+          echo "========== GENERATED IPA FILES =========="
+          find "$PWD/build/ios/ipa" -maxdepth 1 -name "*.ipa" -print
 
     artifacts:
       - build/ios/ipa/*.ipa

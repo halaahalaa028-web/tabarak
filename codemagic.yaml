@@ -17,10 +17,23 @@ workflows:
         bundle_identifier: com.tabarakpharma
 
     scripts:
-      - name: Install CocoaPods dependencies
+      - name: Clean and install CocoaPods dependencies
         script: |
           set -e
+
+          echo "========== CLEAN COCOAPODS =========="
+
+          pod deintegrate || true
+          rm -rf Pods
+
           pod install
+
+          echo "========== CHECK GENERATED LINKER SETTINGS =========="
+          grep -R -n "Pods____________" "Pods/Target Support Files" || true
+
+          echo "========== VERIFY POD INSTALLATION =========="
+          test -f Podfile.lock
+          test -d Pods
 
       - name: Set up code signing
         script: |
@@ -56,6 +69,20 @@ workflows:
           echo "$WORKSPACE" > /tmp/tabarak_workspace.txt
           echo "$SCHEME" > /tmp/tabarak_scheme.txt
 
+      - name: Check linker settings
+        script: |
+          set -e
+
+          echo "========== SEARCH PROJECT LINKER SETTINGS =========="
+
+          grep -n -C 3 "OTHER_LDFLAGS" "تبارك فارما.xcodeproj/project.pbxproj" || true
+
+          echo "========== SEARCH INVALID POD FRAMEWORK =========="
+
+          grep -R -n "Pods____________" \
+            "تبارك فارما.xcodeproj" \
+            "Pods/Target Support Files" || true
+
       - name: Archive Tabarak Pharma app
         script: |
           set -e
@@ -83,7 +110,6 @@ workflows:
 
           if [ ! -d "$APP" ]; then
             echo "ERROR: No iOS application was created."
-            echo "Archive information:"
             plutil -p "$ARCHIVE/Info.plist" || true
             exit 1
           fi

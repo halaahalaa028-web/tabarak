@@ -40,7 +40,7 @@ workflows:
 
           # Only remove the invalid linker option. Do not treat generated module
           # names (umbrella.h, dummy.m, modulemap) as linker flags.
-          pattern = re.compile(r'(?<!\\S)-framework\\s+["\\']?Pods_{4,}["\\']?')
+          pattern = re.compile(r"""(?<!\\S)-framework\\s+["']?Pods_{4,}["']?""")
           roots = [Path(".")]
           changed = []
           for base in roots:

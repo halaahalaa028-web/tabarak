@@ -33,6 +33,48 @@ workflows:
           test -f Podfile.lock
           test -d Pods
 
+          echo "========== REMOVE BROKEN COCOAPODS AGGREGATE LINK FLAG =========="
+          python3 <<'PY'
+          from pathlib import Path
+
+          root = Path("Pods/Target Support Files")
+          bad_flags = (
+              '-framework Pods____________',
+              '-framework "Pods____________"',
+              "-framework 'Pods____________'",
+          )
+          changed = []
+          for path in root.rglob("*.xcconfig"):
+              text = path.read_text(encoding="utf-8")
+              updated = text
+              for flag in bad_flags:
+                  updated = updated.replace(flag, "")
+              if updated != text:
+                  path.write_text(updated, encoding="utf-8")
+                  changed.append(str(path))
+
+          print("Patched xcconfig files:", changed if changed else "none")
+          if not changed:
+              print("Checking generated CocoaPods files for the invalid flag...")
+              matches = []
+              for path in root.rglob("*"):
+                  if path.is_file():
+                      try:
+                          if "Pods____________" in path.read_text(encoding="utf-8", errors="ignore"):
+                              matches.append(str(path))
+                      except OSError:
+                          pass
+              print("Remaining matches:", matches)
+          PY
+
+          echo "========== VERIFY INVALID FLAG REMOVED =========="
+          if grep -R -n -- "Pods____________" "Pods/Target Support Files"; then
+            echo "ERROR: Invalid Pods framework reference remains."
+            exit 1
+          else
+            echo "Invalid Pods framework reference removed."
+          fi
+
           echo "========== SEARCH INVALID FRAMEWORK REFERENCES =========="
           grep -R -n --exclude-dir=.git --exclude-dir=build \
             "Pods____________" . || true

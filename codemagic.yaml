@@ -1,4 +1,4 @@
-
+```yaml
 workflows:
   tabarak-ios:
     name: Tabarak Pharma iOS
@@ -25,15 +25,22 @@ workflows:
 
           pod deintegrate || true
           rm -rf Pods
+          rm -f Podfile.lock
 
+          echo "========== INSTALL PODS =========="
           pod install
-
-          echo "========== CHECK GENERATED LINKER SETTINGS =========="
-          grep -R -n "Pods____________" "Pods/Target Support Files" || true
 
           echo "========== VERIFY POD INSTALLATION =========="
           test -f Podfile.lock
           test -d Pods
+
+          echo "========== SEARCH INVALID FRAMEWORK REFERENCES =========="
+          grep -R -n --exclude-dir=.git --exclude-dir=build \
+            "Pods____________" . || true
+
+          echo "========== GENERATED COCOAPODS FILES =========="
+          find "Pods/Target Support Files" -maxdepth 2 \
+            \( -name "*.xcconfig" -o -name "*.framework" \) -print
 
       - name: Set up code signing
         script: |
@@ -59,7 +66,6 @@ workflows:
 
           if ! xcodebuild -list -workspace "$WORKSPACE" 2>/dev/null | grep -Fq "$SCHEME"; then
             echo "ERROR: Scheme '$SCHEME' was not found."
-            echo "Check the available schemes printed above."
             exit 1
           fi
 
@@ -69,19 +75,34 @@ workflows:
           echo "$WORKSPACE" > /tmp/tabarak_workspace.txt
           echo "$SCHEME" > /tmp/tabarak_scheme.txt
 
-      - name: Check linker settings
+      - name: Diagnose linker settings
         script: |
           set -e
 
-          echo "========== SEARCH PROJECT LINKER SETTINGS =========="
+          WORKSPACE=$(cat /tmp/tabarak_workspace.txt)
+          SCHEME=$(cat /tmp/tabarak_scheme.txt)
 
-          grep -n -C 3 "OTHER_LDFLAGS" "تبارك فارما.xcodeproj/project.pbxproj" || true
+          echo "========== PROJECT LINKER REFERENCES =========="
+          grep -n -C 3 "Pods____________" \
+            "تبارك فارما.xcodeproj/project.pbxproj" || true
 
-          echo "========== SEARCH INVALID POD FRAMEWORK =========="
-
+          echo "========== GENERATED POD LINKER REFERENCES =========="
           grep -R -n "Pods____________" \
-            "تبارك فارما.xcodeproj" \
             "Pods/Target Support Files" || true
+
+          echo "========== EFFECTIVE RELEASE LINKER SETTINGS =========="
+          xcodebuild \
+            -showBuildSettings \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            | grep -E -A 3 -B 2 \
+              "OTHER_LDFLAGS|FRAMEWORK_SEARCH_PATHS|PODS_ROOT" || true
+
+          echo "========== COCOAPODS FRAMEWORK REFERENCES =========="
+          grep -n "Pods_تباركفارما.framework" \
+            "تبارك فارما.xcodeproj/project.pbxproj" || true
 
       - name: Archive Tabarak Pharma app
         script: |
@@ -124,7 +145,8 @@ workflows:
             exit 1
           fi
 
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP_BUNDLE/Info.plist")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIdentifier" "$APP_BUNDLE/Info.plist")
 
           echo "Application: $APP_BUNDLE"
           echo "Bundle ID: $BUNDLE_ID"
@@ -134,55 +156,4 @@ workflows:
             exit 1
           fi
 
-          echo "Application archive verified successfully."
-
-      - name: Create export options
-        script: |
-          set -e
-
-          cat > "$PWD/exportOptions.plist" <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store-connect</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>teamID</key>
-              <string>26P3HVTQKC</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>com.tabarakpharma</key>
-                  <string>Tabarak Pharma App Store 2</string>
-              </dict>
-          </dict>
-          </plist>
-          PLIST
-
-          plutil -lint "$PWD/exportOptions.plist"
-
-      - name: Export signed IPA
-        script: |
-          set -e
-
-          mkdir -p "$PWD/build/ios/ipa"
-
-          xcodebuild \
-            -exportArchive \
-            -archivePath "$PWD/build/TabarakPharma.xcarchive" \
-            -exportPath "$PWD/build/ios/ipa" \
-            -exportOptionsPlist "$PWD/exportOptions.plist"
-
-          IPA=$(find "$PWD/build/ios/ipa" -maxdepth 1 -name "*.ipa" -print -quit)
-
-          if [ -z "$IPA" ]; then
-            echo "ERROR: IPA file was not generated."
-            exit 1
-          fi
-
-          echo "SUCCESS: $IPA"
-
-    artifacts:
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
+          echo "Application

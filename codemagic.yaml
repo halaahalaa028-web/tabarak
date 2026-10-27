@@ -21,7 +21,6 @@ workflows:
           set -e
 
           echo "========== CLEAN COCOAPODS =========="
-
           pod deintegrate || true
           rm -rf Pods
           rm -f Podfile.lock
@@ -29,55 +28,51 @@ workflows:
           echo "========== INSTALL PODS =========="
           pod install
 
-          echo "========== VERIFY POD INSTALLATION =========="
           test -f Podfile.lock
           test -d Pods
 
-          echo "========== PATCH ONLY INVALID COCOAPODS LINKER FLAGS =========="
+          echo "========== PATCH INVALID COCOAPODS LINKER FLAGS =========="
           python3 <<'PY'
           from pathlib import Path
           import re
 
-          # Only remove the invalid linker option. Do not treat generated module
-          # names (umbrella.h, dummy.m, modulemap) as linker flags.
           pattern = re.compile(r"""(?<!\S)-framework\s+["']?Pods_{4,}["']?""")
-          roots = [Path(".")]
           changed = []
-          for base in roots:
-              for path in base.rglob("*"):
-                  if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
-                      continue
-                  if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
-                      continue
-                  try:
-                      original = path.read_text(encoding="utf-8")
-                  except (OSError, UnicodeDecodeError):
-                      continue
-                  updated, count = pattern.subn("", original)
-                  if count:
-                      path.write_text(updated, encoding="utf-8")
-                      changed.append(f"{path} (removed {count})")
+
+          for path in Path(".").rglob("*"):
+              if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
+                  continue
+              if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
+                  continue
+              try:
+                  original = path.read_text(encoding="utf-8")
+              except (OSError, UnicodeDecodeError):
+                  continue
+              updated, count = pattern.subn("", original)
+              if count:
+                  path.write_text(updated, encoding="utf-8")
+                  changed.append(f"{path} (removed {count})")
 
           print("Files patched:", changed if changed else "none")
+
           remaining = []
-          for base in roots:
-              for path in base.rglob("*"):
-                  if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
-                      continue
-                  if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
-                      continue
-                  try:
-                      content = path.read_text(encoding="utf-8")
-                  except (OSError, UnicodeDecodeError):
-                      continue
-                  if pattern.search(content):
-                      remaining.append(str(path))
+          for path in Path(".").rglob("*"):
+              if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
+                  continue
+              if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
+                  continue
+              try:
+                  content = path.read_text(encoding="utf-8")
+              except (OSError, UnicodeDecodeError):
+                  continue
+              if pattern.search(content):
+                  remaining.append(str(path))
+
           print("Remaining invalid linker flags:", remaining)
           if remaining:
               raise SystemExit("ERROR: Invalid aggregate CocoaPods linker flag remains.")
           PY
 
-          echo "========== COCOAPODS GENERATED FILES =========="
           find "Pods/Target Support Files" -maxdepth 2 \
             \( -name "*.xcconfig" -o -name "*.framework" \) -print
 
@@ -152,104 +147,4 @@ workflows:
 
           mkdir -p "$PWD/build"
 
-          xcodebuild \
-            -workspace "$WORKSPACE" \
-            -scheme "$SCHEME" \
-            -configuration Release \
-            -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$PWD/build/TabarakPharma.xcarchive" \
-            archive
-
-      - name: Verify application archive
-        script: |
-          set -e
-
-          ARCHIVE="$PWD/build/TabarakPharma.xcarchive"
-          APP="$ARCHIVE/Products/Applications"
-
-          if [ ! -d "$APP" ]; then
-            echo "ERROR: No iOS application was created."
-            plutil -p "$ARCHIVE/Info.plist" || true
-            exit 1
-          fi
-
-          echo "========== APPLICATIONS =========="
-          find "$APP" -maxdepth 1 -name "*.app" -print
-
-          APP_BUNDLE=$(find "$APP" -maxdepth 1 -name "*.app" -print -quit)
-
-          if [ -z "$APP_BUNDLE" ]; then
-            echo "ERROR: App bundle not found."
-            exit 1
-          fi
-
-          BUNDLE_ID=$(/usr/libexec/PlistBuddy \
-            -c "Print :CFBundleIdentifier" "$APP_BUNDLE/Info.plist")
-
-          echo "Application: $APP_BUNDLE"
-          echo "Bundle ID: $BUNDLE_ID"
-
-          if [ "$BUNDLE_ID" != "com.tabarakpharma" ]; then
-            echo "ERROR: Incorrect bundle identifier."
-            exit 1
-          fi
-
-          echo "Application archive verified successfully."
-
-      - name: Create export options
-        script: |
-          set -e
-
-          cat > "$PWD/exportOptions.plist" <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>method</key>
-              <string>app-store-connect</string>
-              <key>signingStyle</key>
-              <string>manual</string>
-              <key>teamID</key>
-              <string>26P3HVTQKC</string>
-              <key>provisioningProfiles</key>
-              <dict>
-                  <key>com.tabarakpharma</key>
-                  <string>Tabarak Pharma App Store 2</string>
-              </dict>
-          </dict>
-          </plist>
-          PLIST
-
-          plutil -lint "$PWD/exportOptions.plist"
-
-      - name: Export signed IPA
-        script: |
-          set -e
-
-          mkdir -p "$PWD/build/ios/ipa"
-
-          xcodebuild \
-            -exportArchive \
-            -archivePath "$PWD/build/TabarakPharma.xcarchive" \
-            -exportPath "$PWD/build/ios/ipa" \
-            -exportOptionsPlist "$PWD/exportOptions.plist"
-
-          IPA=$(find "$PWD/build/ios/ipa" -maxdepth 1 -name "*.ipa" -print -quit)
-
-          if [ -z "$IPA" ]; then
-            echo "ERROR: IPA file was not generated."
-            exit 1
-          fi
-
-          echo "SUCCESS: $IPA"
-
-    artifacts:
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
-
-    publishing:
-      app_store_connect:
-        auth: integration
-        submit_to_testflight: true
-        submit_to_app_store: false
+          # Keep the marketing version unchanged and increment the

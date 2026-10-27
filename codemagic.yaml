@@ -1,3 +1,4 @@
+
 workflows:
   tabarak-ios:
     name: Tabarak Pharma iOS
@@ -20,61 +21,69 @@ workflows:
         script: |
           set -e
 
-          echo "========== CLEAN COCOAPODS =========="
           pod deintegrate || true
           rm -rf Pods
           rm -f Podfile.lock
 
-          echo "========== INSTALL PODS =========="
           pod install
 
           test -f Podfile.lock
           test -d Pods
 
-          echo "========== PATCH INVALID COCOAPODS LINKER FLAGS =========="
           python3 <<'PY'
           from pathlib import Path
           import re
 
           pattern = re.compile(r"""(?<!\S)-framework\s+["']?Pods_{4,}["']?""")
-          changed = []
 
           for path in Path(".").rglob("*"):
-              if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
+              if not path.is_file():
                   continue
-              if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
+              if any(part in {".git", "build"} for part in path.parts):
                   continue
+              if path.suffix not in {
+                  ".xcconfig", ".pbxproj", ".yaml",
+                  ".yml", ".sh", ".txt"
+              }:
+                  continue
+
               try:
                   original = path.read_text(encoding="utf-8")
               except (OSError, UnicodeDecodeError):
                   continue
+
               updated, count = pattern.subn("", original)
               if count:
                   path.write_text(updated, encoding="utf-8")
-                  changed.append(f"{path} (removed {count})")
-
-          print("Files patched:", changed if changed else "none")
+                  print(f"Patched {path}: removed {count} invalid flag(s)")
 
           remaining = []
+
           for path in Path(".").rglob("*"):
-              if not path.is_file() or any(part in {".git", "build"} for part in path.parts):
+              if not path.is_file():
                   continue
-              if path.suffix not in {".xcconfig", ".pbxproj", ".yaml", ".yml", ".sh", ".txt"}:
+              if any(part in {".git", "build"} for part in path.parts):
                   continue
+              if path.suffix not in {
+                  ".xcconfig", ".pbxproj", ".yaml",
+                  ".yml", ".sh", ".txt"
+              }:
+                  continue
+
               try:
                   content = path.read_text(encoding="utf-8")
               except (OSError, UnicodeDecodeError):
                   continue
+
               if pattern.search(content):
                   remaining.append(str(path))
 
-          print("Remaining invalid linker flags:", remaining)
           if remaining:
-              raise SystemExit("ERROR: Invalid aggregate CocoaPods linker flag remains.")
-          PY
+              print("Invalid linker flags remain:", remaining)
+              raise SystemExit(1)
 
-          find "Pods/Target Support Files" -maxdepth 2 \
-            \( -name "*.xcconfig" -o -name "*.framework" \) -print
+          print("CocoaPods linker flag check passed.")
+          PY
 
       - name: Set up code signing
         script: |
@@ -93,21 +102,20 @@ workflows:
             exit 1
           fi
 
-          echo "========== AVAILABLE SCHEMES =========="
-          xcodebuild -list -workspace "$WORKSPACE"
-
           SCHEME="تبارك فارما"
+
+          xcodebuild -list -workspace "$WORKSPACE"
 
           if ! xcodebuild -list -workspace "$WORKSPACE" 2>/dev/null | grep -Fq "$SCHEME"; then
             echo "ERROR: Scheme '$SCHEME' was not found."
             exit 1
           fi
 
-          echo "Selected app scheme: $SCHEME"
-          echo "Workspace: $WORKSPACE"
-
           echo "$WORKSPACE" > /tmp/tabarak_workspace.txt
           echo "$SCHEME" > /tmp/tabarak_scheme.txt
+
+          echo "Workspace: $WORKSPACE"
+          echo "Scheme: $SCHEME"
 
       - name: Diagnose linker settings
         script: |
@@ -117,12 +125,8 @@ workflows:
           SCHEME=$(cat /tmp/tabarak_scheme.txt)
 
           echo "========== PROJECT LINKER REFERENCES =========="
-          grep -n -C 3 "Pods____________" \
+          grep -n -C 2 "Pods____________" \
             "تبارك فارما.xcodeproj/project.pbxproj" || true
-
-          echo "========== GENERATED POD LINKER REFERENCES =========="
-          grep -R -n "Pods____________" \
-            "Pods/Target Support Files" || true
 
           echo "========== EFFECTIVE RELEASE LINKER SETTINGS =========="
           xcodebuild \
@@ -134,17 +138,35 @@ workflows:
             | grep -E -A 3 -B 2 \
               "OTHER_LDFLAGS|FRAMEWORK_SEARCH_PATHS|PODS_ROOT" || true
 
-          echo "========== COCOAPODS FRAMEWORK REFERENCES =========="
-          grep -n "Pods_تباركفارما.framework" \
-            "تبارك فارما.xcodeproj/project.pbxproj" || true
-
-      - name: Archive Tabarak Pharma app
+      - name: Build signed Tabarak Pharma IPA
         script: |
           set -e
 
           WORKSPACE=$(cat /tmp/tabarak_workspace.txt)
           SCHEME=$(cat /tmp/tabarak_scheme.txt)
 
-          mkdir -p "$PWD/build"
+          xcode-project build-ipa \
+            --workspace "$WORKSPACE" \
+            --scheme "$SCHEME"
 
-          # Keep the marketing version unchanged and increment the
+          echo "========== VERIFY IPA OUTPUT =========="
+          find build -type f -name "*.ipa" -print
+
+          IPA=$(find build -type f -name "*.ipa" -print -quit)
+
+          if [ -z "$IPA" ]; then
+            echo "ERROR: IPA file was not generated."
+            exit 1
+          fi
+
+          echo "IPA generated: $IPA"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/**/*.dSYM
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true

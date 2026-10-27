@@ -3,15 +3,6 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>The microphone lets you record audio when using features that require audio recording or voice input.</string>
-
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Your location helps provide location-based pharmacy services while you are using the app.</string>
-
-	<key>NSCameraUsageDescription</key>
-	<string>The camera lets you scan product barcodes or take photos when using features that require the camera.</string>
-
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 
@@ -134,6 +125,5 @@
 	<array>
 		<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	</array>
-
 </dict>
 </plist>
